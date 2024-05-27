@@ -404,6 +404,8 @@ klist_t(lms) *kl_messages;
 khash_t(hs32) *khs_ipsm_paths;
 khash_t(hms) *khms_states;
 
+u8* last_buf;
+u32 last_buf_len;
 //M2_prev points to the last message of M1 (i.e., prefix)
 //If M1 is empty, M2_prev == NULL
 //M2_next points to the first message of M3 (i.e., suffix)
@@ -1088,6 +1090,7 @@ int send_over_network()
       response_bytes[messages_sent - 1] = response_buf_size;
     }
     n = net_send(sockfd, timeout, msgbuf, msglen);
+    last_buf_len = msglen;
     if (n < 0){
       goto HANDLE_RESPONSES;
     }
@@ -1098,8 +1101,10 @@ int send_over_network()
     }
   }
   else{
+    last_buf_len = 0;
     for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
       n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+      last_buf_len += kl_val(it)->msize;
       messages_sent++;
 
       //Allocate memory to store new accumulated response buffer size
@@ -4047,7 +4052,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
   //s32 fd;
   u8  keeping = 0, res;
 
-  if (fault == crash_mode) {
+  if (fault == crash_mode) {// no fault and no crash_mode || fault_crash and crash_mode
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
@@ -4232,6 +4237,17 @@ keep_as_crash:
 
   save_kl_messages_to_file(kl_messages, fn, 1, messages_sent);
 
+
+  /*save the last test file*/
+  fn = alloc_printf("%s/replayable-crashes/id:%06llu_last_messages,sig:%02u,%s", out_dir,
+                        unique_crashes, kill_signal, describe_op(0));
+  s32 fd = open(fn, O_WRONLY | O_CREAT, 0600);
+  if (fd < 0) PFATAL("Unable to create file '%s'", fn);
+  if(remote_mode){
+    ck_write(fd, last_buf, last_buf_len, fn);
+    stop_soon = 1;
+  }
+  
   /*fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (fd < 0) PFATAL("Unable to create '%s'", fn);
   ck_write(fd, mem, len, fn);
@@ -5575,7 +5591,10 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
-
+  
+  /*store the last test buf*/
+  last_buf = ck_realloc(last_buf, last_buf_len);
+  memcpy(last_buf, out_buf, last_buf_len);
   return 0;
 
 }
