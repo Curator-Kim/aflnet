@@ -1054,11 +1054,11 @@ int send_over_network()
   if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
     //If it cannot connect to the server under test
     //try it again as the server initial startup time is varied
-    for (n=0; n < 100; n++) {
+    for (n=0; n < 1000; n++) {
       if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
       usleep(500);
     }
-    if (n == 100) {
+    if (n == 1000) {
       close(sockfd);
       if (remote_mode){
         return FAULT_CRASH; // Maybe crash. it needs to confirm.
