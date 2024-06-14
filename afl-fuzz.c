@@ -9170,7 +9170,10 @@ int main(int argc, char** argv) {
           NOT_SPLIT_UP_REQUEST = 1;
           extract_requests = &extract_requests_MODBUSTCP;
           extract_response_codes = &extract_response_codes_MODBUSTCP;
-        } 
+        } else if (!strcmp(optarg, "LPD")){
+          extract_requests = &extract_requests_LPD;
+          extract_response_codes = &extract_response_codes_LPD;
+        }
         else {
           FATAL("%s protocol is not supported yet!", optarg);
         }

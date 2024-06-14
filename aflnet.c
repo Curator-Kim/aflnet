@@ -1866,6 +1866,14 @@ region_t *extract_requests_MODBUSTCP(unsigned char* buf, unsigned int buf_size, 
   *region_count_ref = region_count;
   return regions;
 }
+
+region_t *extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
+
+
+}
+
+
+
 // a status code comprises <content_type, message_type> tuples
 // message_type varies depending on content_type (e.g. for handshake content, message_type is the handshake message type...)
 //
@@ -2378,6 +2386,11 @@ unsigned int* extract_response_codes_MODBUSTCP(unsigned char* buf, unsigned int 
 RET:
   *state_count_ref = state_count;
   return state_sequence;
+}
+
+region_t *extract_response_codes_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
+
+
 }
 
 // kl_messages manipulating functions
