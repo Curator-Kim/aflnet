@@ -1868,8 +1868,39 @@ region_t *extract_requests_MODBUSTCP(unsigned char* buf, unsigned int buf_size, 
 }
 
 region_t *extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
-
-
+  /*
+  the format of lpd protocal like
+      +----+-------+----+
+      | 01 | Queue | LF |
+      +----+-------+----+
+  so just parse it by LF(0x0a)
+  */
+  unsigned int region_count = 0;
+  region_t *regions = NULL ;
+  unsigned int cur_start = 0;
+  unsigned int cur_end = 0;
+  if (!buf || buf_size == 0 ){
+    *region_count_ref = 0;
+    return NULL;
+  }
+  while(cur_start < buf_size){
+    region_count += 1; // a new region should be assigned.
+    regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
+    while(buf[cur_end]!=0x0a && cur_end < buf_size - 1){ // the packet may by malformed
+      cur_end += 1;
+    }
+    regions[region_count - 1].start_byte = cur_start;
+    regions[region_count - 1].end_byte = cur_end;
+    regions[region_count - 1].state_sequence = NULL;
+    regions[region_count - 1].state_count = 0;
+    cur_start = cur_end + 1;
+    cur_end += 1;
+    // if (cur_end == buf_size - 1){ // reach the end;
+    //   break;
+    // }
+  }
+  *region_count_ref = region_count;
+  return regions;
 }
 
 
@@ -2388,9 +2419,28 @@ RET:
   return state_sequence;
 }
 
-region_t *extract_response_codes_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
+unsigned int* extract_response_codes_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) {
+  /*
+  the response code of LPD is simple, either zero or other.
+  zero means right, others means wrong.
+  */
+  unsigned int *state_sequence = NULL;
+  unsigned int state_count = 0;
+  unsigned int byte_count = 0;
 
+  state_count++;
+  state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+  state_sequence[state_count - 1] = 0;
 
+  while (byte_count < buf_size){
+    state_count++;
+    state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+    state_sequence[state_count - 1] = buf[byte_count];
+    byte_count += 1;
+  }
+
+  *state_count_ref = state_count;
+  return state_sequence;
 }
 
 // kl_messages manipulating functions

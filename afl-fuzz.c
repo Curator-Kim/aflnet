@@ -1056,7 +1056,7 @@ int send_over_network()
     //try it again as the server initial startup time is varied
     for (n=0; n < 1000; n++) {
       if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
-      usleep(500);
+      usleep(1000);
     }
     if (n == 1000) {
       close(sockfd);
@@ -1136,6 +1136,7 @@ HANDLE_RESPONSES:
   if(remote_mode){
     //got here without sending anything
     //recv throw error
+    close(sockfd);
     if (messages_sent == 0 || response_bytes == NULL)
       return FAULT_ERROR;
     // got here normally or have encountered error in loop
@@ -4245,7 +4246,7 @@ keep_as_crash:
   if (fd < 0) PFATAL("Unable to create file '%s'", fn);
   if(remote_mode){
     ck_write(fd, last_buf, last_buf_len, fn);
-    stop_soon = 1;
+    // stop_soon = 1;
   }
   
   /*fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
