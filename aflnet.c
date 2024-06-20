@@ -1879,22 +1879,58 @@ region_t *extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsign
   region_t *regions = NULL ;
   unsigned int cur_start = 0;
   unsigned int cur_end = 0;
-  if (!buf || buf_size == 0 ){
+  unsigned int COUNT = 0, TEMP_COUNT = 0;// COUNT means next packet's len
+  unsigned char TASK=0, SUBTASK=0, FLAG=0; //if FLAG==1(WHEN TASK=2), we need to set SUBTASK 
+  if (!buf || buf_size == 0 ){//buf is empty
     *region_count_ref = 0;
     return NULL;
   }
+
   while(cur_start < buf_size){
+    if(FLAG == 0){
+      TASK = buf[cur_start];
+      if(TASK == 2)
+        FLAG = 1;
+    }
+    else{
+      SUBTASK = buf[cur_start];
+    }
     region_count += 1; // a new region should be assigned.
     regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
-    while(buf[cur_end]!=0x0a && cur_end < buf_size - 1){ // the packet may by malformed
+    if(SUBTASK == 1){
+      FLAG = 0;
+      SUBTASK = 0;
+    }
+    else if(SUBTASK == 3 || SUBTASK == 2){
+      TEMP_COUNT = atoi(buf + cur_start + 1);// STOP when meeting SP
+    }
+
+    if(COUNT == 0){
+      while(buf[cur_end] != 0x0a && cur_end < buf_size - 1){ // the packet may by malformed
+        cur_end += 1;
+      }
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
       cur_end += 1;
     }
-    regions[region_count - 1].start_byte = cur_start;
-    regions[region_count - 1].end_byte = cur_end;
-    regions[region_count - 1].state_sequence = NULL;
-    regions[region_count - 1].state_count = 0;
-    cur_start = cur_end + 1;
-    cur_end += 1;
+    else{
+      if(cur_start + COUNT < buf_size){
+        cur_end = cur_start + COUNT;
+      }else{
+        cur_end = buf_size - 1; //malformed case
+      }
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+      cur_end += 1;
+      COUNT = TEMP_COUNT = 0;
+    }
+    COUNT = TEMP_COUNT;
     // if (cur_end == buf_size - 1){ // reach the end;
     //   break;
     // }
@@ -2430,7 +2466,7 @@ unsigned int* extract_response_codes_LPD(unsigned char* buf, unsigned int buf_si
 
   state_count++;
   state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
-  state_sequence[state_count - 1] = 0;
+  state_sequence[state_count - 1] = 0xffff;
 
   while (byte_count < buf_size){
     state_count++;
