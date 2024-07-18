@@ -1904,7 +1904,7 @@ region_t *extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsign
     else if(SUBTASK == 3 || SUBTASK == 2){
       TEMP_COUNT = atoi(buf + cur_start + 1);// STOP when meeting SP
     }
-
+    
     if(COUNT == 0){
       while(buf[cur_end] != 0x0a && cur_end < buf_size - 1){ // the packet may by malformed
         cur_end += 1;
@@ -1939,6 +1939,44 @@ region_t *extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsign
   return regions;
 }
 
+region_t *extract_requests_CODESYS_V2(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
+  /*| Header: bb bb | length(4 bytes) | function code(1 byte) | payload |*/
+  unsigned int region_count = 0;
+  region_t *regions = NULL ;
+  unsigned int cur_start = 0;
+  unsigned int cur_end = 0;
+  if (!buf || buf_size == 0 ){
+    *region_count_ref = 0;
+    return NULL;
+  }
+  while(cur_start < buf_size){
+    region_count += 1; // a new region should be assigned.
+    regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
+    if (cur_end - cur_start >= 8){// the minimal size of CODESYS_V2
+      unsigned int remained_length = 0;
+      remained_length = (buf[2] << 24) + (buf[3] << 16) + (buf[4] << 8) + (buf[5]);
+      if(buf_size - cur_start >= 6 + remained_length){
+        cur_end = cur_start + 6 + remained_length;
+      }else{//malformed
+        cur_end = buf_size - 1;
+      }
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+    }else{// malformed packet
+      cur_end = buf_size - 1;
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+    }
+  }
+  *region_count_ref = region_count;
+  return regions;
+}
 
 
 // a status code comprises <content_type, message_type> tuples
@@ -2479,6 +2517,40 @@ unsigned int* extract_response_codes_LPD(unsigned char* buf, unsigned int buf_si
   return state_sequence;
 }
 
+unsigned int* extract_response_codes_CODESYS_V2(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref){
+  /*I am not sure about the format of the Codesys V2 response packet. 
+    Guess it by request packet~
+  */
+  unsigned int *state_sequence = NULL;
+  unsigned int state_count = 0;
+  unsigned int byte_count = 0;
+  state_count++;
+  state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+  state_sequence[state_count - 1] = 0;
+
+  while(byte_count < buf_size){
+    state_count++;
+    state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+    unsigned int remained_length = 0;
+    if(buf_size - byte_count >= 8){
+      remained_length = (buf[2] << 24) + (buf[3] << 16) + (buf[4] << 8) + (buf[5]);
+      state_sequence[state_count - 1] = (buf[6] << 8) + buf[7]; // function_code || the first byte of payload
+      if(buf_size - byte_count >= 6 + remained_length){
+        byte_count += remained_length;
+      }
+      else{
+        byte_count = buf_size;
+      }
+    }
+    else{
+      state_sequence[state_count - 1] = 0xffff;
+      byte_count = buf_size;
+    }
+  }
+  *state_count_ref = state_count;
+  return state_sequence;
+}
+
 // kl_messages manipulating functions
 
 klist_t(lms) *construct_kl_messages(u8* fname, region_t *regions, u32 region_count)
@@ -2611,59 +2683,28 @@ region_t* convert_kl_messages_to_regions(klist_t(lms) *kl_messages, u32* region_
 // Network communication functions
 
 int net_send(int sockfd, struct timeval timeout, char *mem, unsigned int len) {
-  unsigned int byte_count = 0;
-  int n;
-  struct pollfd pfd[1];
-  pfd[0].fd = sockfd;
-  pfd[0].events = POLLOUT;
-  int rv = poll(pfd, 1, 1);// query
-
-  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
-  if (rv > 0) {
-    if (pfd[0].revents & POLLOUT) {
-      while (byte_count < len) {
-        usleep(10);
-        n = send(sockfd, &mem[byte_count], len - byte_count, MSG_NOSIGNAL);
-        if (n == 0) return byte_count;
-        if (n == -1) return -1;
-        byte_count += n;
-      }
-    }
-  }
-  return byte_count;
+  return send(sockfd, mem, len, MSG_NOSIGNAL);
 }
  // return number of bytes received. return -1/0 if error.
 int net_recv(int sockfd, struct timeval timeout, int poll_w, char **response_buf, unsigned int *len) {
   char temp_buf[1000];
   int n;
-  struct pollfd pfd[1];
-  pfd[0].fd = sockfd;
-  pfd[0].events = POLLIN;
-  int rv = poll(pfd, 1, poll_w);
-
-  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-  // data received
-  if (rv > 0) {
-    if (pfd[0].revents & POLLIN) {
-      n = recv(sockfd, temp_buf, sizeof(temp_buf), 0);
-      if ((n < 0) && (errno != EAGAIN)) {
-        return -1;
-      }
-      while (n > 0) {
-        usleep(10);
-        *response_buf = (unsigned char *)ck_realloc(*response_buf, *len + n + 1);
-        memcpy(&(*response_buf)[*len], temp_buf, n);
-        (*response_buf)[(*len) + n] = '\0';
-        *len = *len + n;
-        n = recv(sockfd, temp_buf, sizeof(temp_buf), 0);
-        if ((n < 0) && (errno != EAGAIN)) {
-          return -1;
-        }
-      }
+  n = recv(sockfd, temp_buf, sizeof(temp_buf), 0);
+  if ((n < 0) && (errno != EAGAIN)) {
+    return -1;
+  }
+  while (n > 0) {
+    usleep(10);
+    *response_buf = (unsigned char *)ck_realloc(*response_buf, *len + n + 1);
+    memcpy(&(*response_buf)[*len], temp_buf, n);
+    (*response_buf)[(*len) + n] = '\0';
+    *len = *len + n;
+    n = recv(sockfd, temp_buf, sizeof(temp_buf), 0);
+    if ((n < 0) && (errno != EAGAIN)) {
+      return -1;
     }
-    return *len; // all data pending after poll has been received successfully
-  } 
-  return rv; // poll return -1 || 0
+  }
+  return *len; // all data pending after poll has been received successfully 
 }
 
 // Utility function

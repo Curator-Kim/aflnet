@@ -1026,11 +1026,13 @@ int send_over_network()
 
   //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
   //if the server is still alive after processing all the requests
-  struct timeval timeout;
-  timeout.tv_sec = 0;
-  timeout.tv_usec = socket_timeout_usecs;
-  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
-
+  struct timeval timeout_send, timeout_recv;
+  timeout_send.tv_sec = 0;
+  timeout_send.tv_usec = socket_timeout_usecs;
+  timeout_recv.tv_sec = 0;
+  timeout_recv.tv_usec = socket_timeout_usecs;
+  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
+  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
   memset(&serv_addr, '0', sizeof(serv_addr));
 
   serv_addr.sin_family = AF_INET;
@@ -1069,7 +1071,7 @@ int send_over_network()
   }
 
   //retrieve early server response if needed
-  n = net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+  n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
   if (n < 0) goto HANDLE_RESPONSES;
 
   //write the request messages
@@ -1089,12 +1091,12 @@ int send_over_network()
       response_bytes = (u32 *)ck_realloc_block(response_bytes, messages_sent * sizeof(u32));
       response_bytes[messages_sent - 1] = response_buf_size;
     }
-    n = net_send(sockfd, timeout, msgbuf, msglen);
+    n = net_send(sockfd, timeout_send, msgbuf, msglen);
     last_buf_len = msglen;
     if (n < 0){
       goto HANDLE_RESPONSES;
     }
-    n = net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+    n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
     response_bytes[messages_sent - 1] = response_buf_size;
     if ( n < 0 ) {
       goto HANDLE_RESPONSES; //NOT Receive any response. May be crash.
@@ -1103,7 +1105,7 @@ int send_over_network()
   else{
     last_buf_len = 0;
     for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
-      n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+      n = net_send(sockfd, timeout_send, kl_val(it)->mdata, kl_val(it)->msize);
       last_buf_len += kl_val(it)->msize;
       messages_sent++;
 
@@ -1117,7 +1119,7 @@ int send_over_network()
 
       //retrieve server response
       u32 prev_buf_size = response_buf_size;
-      n = net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+      n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
       // allowing timeouts
       if ( n < 0 ) {
         goto HANDLE_RESPONSES;
@@ -1144,7 +1146,7 @@ HANDLE_RESPONSES:
     if (n < 0)
       return FAULT_CRASH;
   }
-  n = net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+  n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
 
   if (messages_sent > 0 && response_bytes != NULL) {
     response_bytes[messages_sent - 1] = response_buf_size;
@@ -9097,7 +9099,7 @@ int main(int argc, char** argv) {
         break;
 
       case 'W': /* polling timeout determining maximum amount of time waited before concluding that no responses are forthcoming*/
-        if (socket_timeout) FATAL("Multiple -W options not supported");
+        if (poll_wait) FATAL("Multiple -W options not supported");
 
         if (sscanf(optarg, "%u", &poll_wait_msecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -W");
         poll_wait = 1;
@@ -9174,6 +9176,9 @@ int main(int argc, char** argv) {
         } else if (!strcmp(optarg, "LPD")){
           extract_requests = &extract_requests_LPD;
           extract_response_codes = &extract_response_codes_LPD;
+        } else if (!strcmp(optarg, "CODESYS_V2")){
+          extract_requests = &extract_requests_CODESYS_V2;
+          extract_response_codes = &extract_response_codes_CODESYS_V2;
         }
         else {
           FATAL("%s protocol is not supported yet!", optarg);
