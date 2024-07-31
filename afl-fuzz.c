@@ -9179,6 +9179,9 @@ int main(int argc, char** argv) {
         } else if (!strcmp(optarg, "CODESYS_V2")){
           extract_requests = &extract_requests_CODESYS_V2;
           extract_response_codes = &extract_response_codes_CODESYS_V2;
+        } else if (!strcmp(optarg, "CODESYS_V3")){
+          extract_requests = &extract_requests_CODESYS_V3;
+          extract_response_codes = &extract_response_codes_CODESYS_V3;
         }
         else {
           FATAL("%s protocol is not supported yet!", optarg);

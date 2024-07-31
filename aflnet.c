@@ -1952,7 +1952,7 @@ region_t *extract_requests_CODESYS_V2(unsigned char* buf, unsigned int buf_size,
   while(cur_start < buf_size){
     region_count += 1; // a new region should be assigned.
     regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
-    if (cur_end - cur_start >= 8){// the minimal size of CODESYS_V2
+    if (buf_size - cur_start >= 8){// the minimal size of CODESYS_V2
       unsigned int remained_length = 0;
       remained_length = (buf[2] << 24) + (buf[3] << 16) + (buf[4] << 8) + (buf[5]);
       if(buf_size - cur_start >= 6 + remained_length){
@@ -1978,6 +1978,58 @@ region_t *extract_requests_CODESYS_V2(unsigned char* buf, unsigned int buf_size,
   return regions;
 }
 
+region_t *extract_requests_CODESYS_V3(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) {
+  /*
+  Block Driver Header || Datagram Header || Channel Header || Services Header
+  The format of the block driver header:
+  ||magic number: 00 01 17 e8 || length (4 bytes) ||
+  */
+  unsigned int region_count = 0;
+  region_t *regions = NULL ;
+  unsigned int cur_start = 0;
+  unsigned int cur_end = 0;
+  if (!buf || buf_size == 0 ){
+    *region_count_ref = 0;
+    return NULL;
+  }
+  while(cur_start < buf_size){
+    region_count += 1; // a new region should be assigned.
+    regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
+    if(buf_size - cur_start >= 8){
+      unsigned int remained_length = 0;
+      remained_length = (buf[cur_start + 7] << 24) + (buf[cur_start + 6] << 16) + (buf[cur_start + 5] << 8) + (buf[cur_start + 4]);
+      if(buf_size - cur_start >= 8 + remained_length){
+        cur_end = cur_start + 8 + remained_length - 1;
+      }
+      else{// length field maybe broken. We can try find the magic number to determine the end
+        cur_end = cur_start + 8;
+        if(buf_size - cur_end > 4){
+          while(!(buf[cur_end+1]==0 && buf[cur_end+2]==01 && buf[cur_end+3]==0x17 && buf[cur_end+4] == 0xe8)\
+          && (buf_size - cur_end > 4)){
+            cur_end += 1;
+          }
+        }
+        else{
+          cur_end = buf_size - 1;
+        }
+      }
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+    }else{//malformed
+      cur_end = buf_size - 1;
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+    }
+  }
+  *region_count_ref = region_count;
+  return regions;
+}
 
 // a status code comprises <content_type, message_type> tuples
 // message_type varies depending on content_type (e.g. for handshake content, message_type is the handshake message type...)
@@ -2534,7 +2586,7 @@ unsigned int* extract_response_codes_CODESYS_V2(unsigned char* buf, unsigned int
     unsigned int remained_length = 0;
     if(buf_size - byte_count >= 8){
       remained_length = (buf[2] << 24) + (buf[3] << 16) + (buf[4] << 8) + (buf[5]);
-      state_sequence[state_count - 1] = (buf[6] << 8) + buf[7]; // function_code || the first byte of payload
+      state_sequence[state_count - 1] = (buf[byte_count + 6] << 8) + buf[byte_count + 7]; // function_code || the first byte of payload
       if(buf_size - byte_count >= 6 + remained_length){
         byte_count += remained_length;
       }
@@ -2543,6 +2595,39 @@ unsigned int* extract_response_codes_CODESYS_V2(unsigned char* buf, unsigned int
       }
     }
     else{
+      state_sequence[state_count - 1] = 0xffff;
+      byte_count = buf_size;
+    }
+  }
+  *state_count_ref = state_count;
+  return state_sequence;
+}
+
+unsigned int* extract_response_codes_CODESYS_V3(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref){
+  /*I dont have real package of protocol CODESYS_V3. The implementation may by wrong...
+    The same splitting method as how we split request package. And extract service group + service ID in service layer as response codes.
+  */
+  unsigned int *state_sequence = NULL;
+  unsigned int state_count = 0;
+  unsigned int byte_count = 0;
+  state_count++;
+  state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+  state_sequence[state_count - 1] = 0;
+  while(byte_count < buf_size){
+    state_count++;
+    state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+    unsigned int remained_length = 0;
+    if(buf_size - byte_count >= 8 + 19 + 20 + 20) {// Block driver layer(8 bytes) + Datagram layer(19 bytes) + Channel layer(20 bytes) + service layer(20 bytes)
+      remained_length = (buf[byte_count + 7] << 24) + (buf[byte_count + 6] << 16) +\
+       (buf[byte_count + 5] << 8) + (buf[byte_count + 4]);
+      //service layer
+      unsigned int loc_serv = byte_count + 8 + 19 + 20;
+      unsigned short service_group = (buf[loc_serv + 5] << 8) + buf[loc_serv + 4]; 
+      unsigned short service_id = (buf[loc_serv + 7] << 8 ) + buf[loc_serv + 6];     
+      state_sequence[state_count - 1] = (service_group << 16) + service_id;
+      byte_count += remained_length;
+    }
+    else{// broken package
       state_sequence[state_count - 1] = 0xffff;
       byte_count = buf_size;
     }
