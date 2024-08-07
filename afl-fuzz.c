@@ -394,6 +394,10 @@ u8 region_level_mutation = 0;
 u8 state_selection_algo = ROUND_ROBIN, seed_selection_algo = RANDOM_SELECTION;
 u8 false_negative_reduction = 0;
 u8 NOT_SPLIT_UP_REQUEST = 0;
+u8 KEEP_ONE_CONNECTION = 0;
+u8 connection_state = 0; // 1 -- up, 0 -- down
+u8 sockfd = -1;
+struct timeval timeout_send, timeout_recv;
 
 /* Implemented state machine */
 Agraph_t  *ipsm;
@@ -992,15 +996,6 @@ int send_over_network()
 {
   int n;
   u8 likely_buggy = 0;
-  struct sockaddr_in serv_addr;
-  struct sockaddr_in local_serv_addr;
-
-  //Clean up the server if needed
-  if (cleanup_script) system(cleanup_script);
-
-  //Wait a bit for the server initialization
-  usleep(server_wait_usecs);
-
   //Clear the response buffer and reset the response buffer size
   if (response_buf) {
     ck_free(response_buf);
@@ -1013,67 +1008,74 @@ int send_over_network()
     response_bytes = NULL;
   }
 
-  //Create a TCP/UDP socket
-  int sockfd = -1;
-  if (net_protocol == PRO_TCP)
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  else if (net_protocol == PRO_UDP)
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-  if (sockfd < 0) {
-    PFATAL("Cannot create a socket");
+  if (KEEP_ONE_CONNECTION && connection_state){
+    
   }
+  else{
+    struct sockaddr_in serv_addr;
+    struct sockaddr_in local_serv_addr;
 
-  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
-  //if the server is still alive after processing all the requests
-  struct timeval timeout_send, timeout_recv;
-  timeout_send.tv_sec = 0;
-  timeout_send.tv_usec = socket_timeout_usecs;
-  timeout_recv.tv_sec = 0;
-  timeout_recv.tv_usec = socket_timeout_usecs;
-  setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
-  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
-  memset(&serv_addr, '0', sizeof(serv_addr));
+    //Clean up the server if needed
+    if (cleanup_script) system(cleanup_script);
 
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(net_port);  // transfer
-  serv_addr.sin_addr.s_addr = inet_addr(net_ip); 
+    //Wait a bit for the server initialization
+    usleep(server_wait_usecs);
 
-  //This piece of code is only used for targets that send responses to a specific port number
-  //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
-  //will be bound to the given local port
-  if(local_port > 0) {
-    local_serv_addr.sin_family = AF_INET;
-    local_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    local_serv_addr.sin_port = htons(local_port);
+    //set a TCP/UDP socket
+    if (net_protocol == PRO_TCP)
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    else if (net_protocol == PRO_UDP)
+      sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
-      FATAL("Unable to bind socket on local source port");
+    if (sockfd < 0) {
+      PFATAL("Cannot create a socket");
     }
-  }
 
-  if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-    //If it cannot connect to the server under test
-    //try it again as the server initial startup time is varied
-    for (n=0; n < 1000; n++) {
-      if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
-      usleep(1000);
-    }
-    if (n == 1000) {
-      close(sockfd);
-      if (remote_mode){
-        return FAULT_CRASH; // Maybe crash. it needs to confirm.
+    
+    memset(&serv_addr, '0', sizeof(serv_addr));
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(net_port);  // transfer
+    serv_addr.sin_addr.s_addr = inet_addr(net_ip); 
+
+    //This piece of code is only used for targets that send responses to a specific port number
+    //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
+    //will be bound to the given local port
+    if(local_port > 0) {
+      local_serv_addr.sin_family = AF_INET;
+      local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+      local_serv_addr.sin_port = htons(local_port);
+
+      local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+      if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
+        FATAL("Unable to bind socket on local source port");
       }
-      return FAULT_ERROR; // what happen? cannot connect to the binary
-      
     }
+
+    if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+      //If it cannot connect to the server under test
+      //try it again as the server initial startup time is varied
+      for (n=0; n < 1000; n++) {
+        if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
+          connection_state = 1;
+          break;
+        }
+        usleep(1000);
+      }
+      if (n == 1000) {
+        close(sockfd);
+        if (remote_mode){
+          return FAULT_CRASH; // Maybe crash. it needs to confirm.
+        }
+        return FAULT_ERROR; // what happen? cannot connect to the binary
+      }
+    }
+    //retrieve early server response if needed
+    n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
+    if (n < 0) goto HANDLE_RESPONSES;
   }
-
-  //retrieve early server response if needed
-  n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
-  if (n < 0) goto HANDLE_RESPONSES;
-
+  
   //write the request messages
   kliter_t(lms) *it;
   messages_sent = 0;
@@ -1139,6 +1141,7 @@ HANDLE_RESPONSES:
     //got here without sending anything
     //recv throw error
     close(sockfd);
+    connection_state = 0;
     if (messages_sent == 0 || response_bytes == NULL)
       return FAULT_ERROR;
     // got here normally or have encountered error in loop
@@ -1159,6 +1162,7 @@ HANDLE_RESPONSES:
   }
 
   close(sockfd);
+  connection_state = 0;
 
   if (likely_buggy && false_negative_reduction) return 0;
   if (!remote_mode){
@@ -8191,7 +8195,8 @@ static void usage(u8* argv0) {
        "  -c cleanup    - name or full path to the server cleanup script (see README.md)\n"
        "  -q algo       - state selection algorithm (See aflnet.h for all available options)\n"
        "  -s algo       - seed selection algorithm (See aflnet.h for all available options)\n"
-       "  -r            - only remote fuzz, like black box fuzzing\n\n"
+       "  -r            - only remote fuzz, like black box fuzzing\n"
+       "  -k            - keep one TCP connection until closed\n\n"
 
        "Other stuff:\n\n"
 
@@ -9110,6 +9115,14 @@ int main(int argc, char** argv) {
 
         if (sscanf(optarg, "%u", &socket_timeout_usecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -w");
         socket_timeout = 1;
+        //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+        //if the server is still alive after processing all the requests
+        timeout_send.tv_sec = 0;
+        timeout_send.tv_usec = socket_timeout_usecs;
+        timeout_recv.tv_sec = 0;
+        timeout_recv.tv_usec = socket_timeout_usecs;
+        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
         break;
 
       case 'e': /* network namespace name */
@@ -9170,7 +9183,7 @@ int main(int argc, char** argv) {
           extract_requests = &extract_requests_SNMP;
           extract_response_codes = &extract_response_codes_SNMP;
         }else if (!strcmp(optarg, "MODBUSTCP")){
-          NOT_SPLIT_UP_REQUEST = 1;
+          // NOT_SPLIT_UP_REQUEST = 1;
           extract_requests = &extract_requests_MODBUSTCP;
           extract_response_codes = &extract_response_codes_MODBUSTCP;
         } else if (!strcmp(optarg, "LPD")){
@@ -9240,9 +9253,17 @@ int main(int argc, char** argv) {
         no_forkserver = 1;
         dumb_mode = 1;
         break;
+      
+      case 'k': /*
+      keep one tcp connection. It may be useful for situations that require more time to initialze connections.
+      However, it will be more difficult to locate the crash.
+      */ 
+        if (KEEP_ONE_CONNECTION) FATAL("Multiple -k options not supported");
+        KEEP_ONE_CONNECTION = 1;
+        connection_state = 0;
+        break;
 
       default:
-
         usage(argv[0]);
 
     }
