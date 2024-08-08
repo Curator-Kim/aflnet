@@ -1034,6 +1034,7 @@ int send_over_network()
     //This piece of code is only used for targets that send responses to a specific port number
     //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
     //will be bound to the given local port
+    
     if(local_port > 0){
       if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
         FATAL("Unable to bind socket on local source port");
