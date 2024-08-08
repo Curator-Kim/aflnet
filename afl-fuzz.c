@@ -360,6 +360,8 @@ u32 socket_timeout_usecs = 1000;
 u8 net_protocol;
 u8* net_ip;
 u32 net_port;
+struct sockaddr_in serv_addr;
+struct sockaddr_in local_serv_addr;
 char *response_buf = NULL;
 int response_buf_size = 0; //the size of the whole response buffer
 u32 *response_bytes = NULL; //an array keeping accumulated response buffer size
@@ -396,7 +398,7 @@ u8 false_negative_reduction = 0;
 u8 NOT_SPLIT_UP_REQUEST = 0;
 u8 KEEP_ONE_CONNECTION = 0;
 u8 connection_state = 0; // 1 -- up, 0 -- down
-u8 sockfd = -1;
+int sockfd = -1;
 struct timeval timeout_send, timeout_recv;
 
 /* Implemented state machine */
@@ -1010,12 +1012,9 @@ int send_over_network()
 
 
   if (KEEP_ONE_CONNECTION && connection_state){
-    
+    //pass
   }
   else{
-    struct sockaddr_in serv_addr;
-    struct sockaddr_in local_serv_addr;
-
     //Clean up the server if needed
     if (cleanup_script) system(cleanup_script);
 
@@ -1027,27 +1026,15 @@ int send_over_network()
       sockfd = socket(AF_INET, SOCK_STREAM, 0);
     else if (net_protocol == PRO_UDP)
       sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
     if (sockfd < 0) {
       PFATAL("Cannot create a socket");
     }
-
-    
-    memset(&serv_addr, '0', sizeof(serv_addr));
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(net_port);  // transfer
-    serv_addr.sin_addr.s_addr = inet_addr(net_ip); 
-
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
     //This piece of code is only used for targets that send responses to a specific port number
     //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
     //will be bound to the given local port
-    if(local_port > 0) {
-      local_serv_addr.sin_family = AF_INET;
-      local_serv_addr.sin_addr.s_addr = INADDR_ANY;
-      local_serv_addr.sin_port = htons(local_port);
-
-      local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if(local_port > 0){
       if (bind(sockfd, (struct sockaddr*) &local_serv_addr, sizeof(struct sockaddr_in)))  {
         FATAL("Unable to bind socket on local source port");
       }
@@ -1058,7 +1045,6 @@ int send_over_network()
       //try it again as the server initial startup time is varied
       for (n=0; n < 1000; n++) {
         if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
-          connection_state = 1;
           break;
         }
         usleep(1000);
@@ -1071,6 +1057,7 @@ int send_over_network()
         return FAULT_ERROR; // what happen? cannot connect to the binary
       }
     }
+    connection_state = 1; //successfully connect
     //retrieve early server response if needed
     n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
     if (n < 0) goto HANDLE_RESPONSES;
@@ -1140,8 +1127,10 @@ HANDLE_RESPONSES:
   if(remote_mode){
     //got here without sending anything
     //recv throw error
-    close(sockfd);
-    connection_state = 0;
+    if(!KEEP_ONE_CONNECTION){
+      close(sockfd);
+      connection_state = 0;
+    }
     if (messages_sent == 0 || response_bytes == NULL)
       return FAULT_ERROR;
     // got here normally or have encountered error in loop
@@ -1160,10 +1149,10 @@ HANDLE_RESPONSES:
   while(1) {
     if (has_new_bits(session_virgin_bits) != 2) break;
   }
-
-  close(sockfd);
-  connection_state = 0;
-
+  if (!KEEP_ONE_CONNECTION){
+    close(sockfd);
+    connection_state = 0;
+  }
   if (likely_buggy && false_negative_reduction) return 0;
   if (!remote_mode){
     if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
@@ -3343,6 +3332,10 @@ static u8 run_target(char** argv, u32 timeout) {
   /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
   u32 net_status = 0;
   if(use_net) net_status = send_over_network();
+  if(KEEP_ONE_CONNECTION && net_status != 0){
+    close(sockfd);
+    connection_state = 0;
+  }
   if (dumb_mode == 1 || no_forkserver) {
     if (remote_mode){
       // no pid when using remote mode
@@ -4104,12 +4097,12 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
 
-    if (res == FAULT_ERROR)
+    if (res == FAULT_ERROR){
       if (remote_mode)
           FATAL("Unable to connect to remote");
-        else
+      else
           FATAL("Unable to execute target application ('%s')", argv[0]);
-
+    }
     /*fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
     ck_write(fd, mem, len, fn);
@@ -8154,7 +8147,14 @@ static void check_term_size(void) {
 
 }
 
-
+static void set_timeout(void){
+  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+  //if the server is still alive after processing all the requests
+  timeout_send.tv_sec = 0;
+  timeout_send.tv_usec = socket_timeout_usecs;
+  timeout_recv.tv_sec = 0;
+  timeout_recv.tv_usec = socket_timeout_usecs;
+}
 
 /* Display usage hints. */
 
@@ -8921,7 +8921,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:e:P:KEq:s:RFc:l:r")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:e:P:KEq:s:RFc:l:rk")) > 0)
 
     switch (opt) {
 
@@ -9091,8 +9091,12 @@ int main(int argc, char** argv) {
 
       case 'N': /* Network configuration */
         if (use_net) FATAL("Multiple -N options not supported");
-        if (parse_net_config(optarg, &net_protocol, &net_ip, &net_port)) FATAL("Bad syntax used for -N. Check the network setting. [tcp/udp]://127.0.0.1/port");
-
+        if (parse_net_config(optarg, &net_protocol, &net_ip, &net_port)) 
+          FATAL("Bad syntax used for -N. Check the network setting. [tcp/udp]://127.0.0.1/port");
+        memset(&serv_addr, '0', sizeof(serv_addr));
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(net_port);  // transfer
+        serv_addr.sin_addr.s_addr = inet_addr(net_ip); 
         use_net = 1;
         break;
 
@@ -9115,14 +9119,6 @@ int main(int argc, char** argv) {
 
         if (sscanf(optarg, "%u", &socket_timeout_usecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -w");
         socket_timeout = 1;
-        //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
-        //if the server is still alive after processing all the requests
-        timeout_send.tv_sec = 0;
-        timeout_send.tv_usec = socket_timeout_usecs;
-        timeout_recv.tv_sec = 0;
-        timeout_recv.tv_usec = socket_timeout_usecs;
-        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
         break;
 
       case 'e': /* network namespace name */
@@ -9245,6 +9241,12 @@ int main(int argc, char** argv) {
         if (local_port) FATAL("Multiple -l options not supported");
         local_port = atoi(optarg);
 	      if (local_port < 1024 || local_port > 65535) FATAL("Invalid source port number");
+        
+        local_serv_addr.sin_family = AF_INET;
+        local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+        local_serv_addr.sin_port = htons(local_port);
+        local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
         break;
 
       case 'r': /* remote mode, we do black box fuzz */
@@ -9284,7 +9286,8 @@ int main(int argc, char** argv) {
 
   setup_signal_handlers();
   check_asan_opts();
-
+  set_timeout();
+  
   if (sync_id) fix_up_sync();
 
   if (!strcmp(in_dir, out_dir))
