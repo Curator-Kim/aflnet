@@ -1032,7 +1032,7 @@ int send_over_network()
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout_send, sizeof(timeout_send));
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout_recv, sizeof(timeout_recv));
 
-    
+
     //This piece of code is only used for targets that send responses to a specific port number
     //The Kamailio SIP server is an example. After running this code, the intialized sockfd 
     //will be bound to the given local port
@@ -9193,6 +9193,9 @@ int main(int argc, char** argv) {
         } else if (!strcmp(optarg, "CODESYS_V3")){
           extract_requests = &extract_requests_CODESYS_V3;
           extract_response_codes = &extract_response_codes_CODESYS_V3;
+        }else if (!strcmp(optarg, "OPC_UA")){
+          extract_requests = &extract_requests_OPC_UA;
+          extract_response_codes = &extract_response_codes_OPC_UA;
         }
         else {
           FATAL("%s protocol is not supported yet!", optarg);

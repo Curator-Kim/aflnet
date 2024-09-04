@@ -78,6 +78,7 @@ unsigned int* extract_response_codes_MODBUSTCP(unsigned char* buf, unsigned int 
 unsigned int* extract_response_codes_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref);
 unsigned int* extract_response_codes_CODESYS_V2(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref);
 unsigned int* extract_response_codes_CODESYS_V3(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref);
+unsigned int* extract_response_codes_OPC_UA(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref);
 
 extern unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref);
 
@@ -101,6 +102,7 @@ region_t* extract_requests_MODBUSTCP(unsigned char* buf, unsigned int buf_size, 
 region_t* extract_requests_LPD(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref);
 region_t* extract_requests_CODESYS_V2(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref);
 region_t* extract_requests_CODESYS_V3(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref);
+region_t* extract_requests_OPC_UA(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref);
 
 extern region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref);
 

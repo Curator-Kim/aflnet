@@ -2034,6 +2034,58 @@ region_t *extract_requests_CODESYS_V3(unsigned char* buf, unsigned int buf_size,
 // a status code comprises <content_type, message_type> tuples
 // message_type varies depending on content_type (e.g. for handshake content, message_type is the handshake message type...)
 //
+region_t* extract_requests_OPC_UA(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref)
+{
+  /*
+  Message head(12bytes): type(3 bytes) || is_end(1 bytes) || size(4 bytes) || channel id(4 bytes)
+  Payload
+  */
+  unsigned int region_count = 0;
+  region_t *regions = NULL ;
+  if (!buf || buf_size == 0 ){
+    *region_count_ref = 0;
+    return NULL;
+  }
+
+  unsigned int cur_start = 0;
+  unsigned int cur_end = 0;
+
+  while(cur_start < buf_size){
+    region_count += 1; // a new region should be assigned.
+    regions = (region_t *)ck_realloc(regions, region_count * sizeof(region_t));
+
+    if (buf_size - cur_start >= 8){
+
+      unsigned int message_length = 0;
+      message_length = (buf[cur_start + 7] << 24) + (buf[cur_start + 6] << 16) + 
+                        (buf[cur_start + 5] << 8) + (buf[cur_start + 4]);
+
+      if (cur_start + message_length <= buf_size){
+        cur_end = cur_start + message_length - 1;
+      }else{// message broken
+        cur_end = buf_size - 1;
+      }
+
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+
+    }else{
+      //malformed
+      cur_end = buf_size - 1;
+      regions[region_count - 1].start_byte = cur_start;
+      regions[region_count - 1].end_byte = cur_end;
+      regions[region_count - 1].state_sequence = NULL;
+      regions[region_count - 1].state_count = 0;
+      cur_start = cur_end + 1;
+    }
+  }
+  *region_count_ref = region_count;
+  return regions;
+}
+
 unsigned int* extract_response_codes_dtls12(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref)
 {
   unsigned int byte_count = 0;
@@ -2632,6 +2684,53 @@ unsigned int* extract_response_codes_CODESYS_V3(unsigned char* buf, unsigned int
       byte_count = buf_size;
     }
   }
+  *state_count_ref = state_count;
+  return state_sequence;
+}
+
+unsigned int* extract_response_codes_OPC_UA(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref)
+{
+  /*
+  Message head(12bytes): type(3 bytes) || is_end(1 bytes) || size(4 bytes) || channel id(4 bytes)
+  Payload : ....
+  set type as response code
+  */
+  unsigned int *state_sequence = NULL;
+  unsigned int state_count = 0;
+  unsigned int byte_count = 0;
+  state_count++;
+  state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+  state_sequence[state_count - 1] = 0;
+
+
+  while(byte_count < buf_size){
+    state_count++;
+    state_sequence = (unsigned int *)ck_realloc(state_sequence, state_count * sizeof(unsigned int));
+
+    if (buf_size - byte_count >= 8){
+      state_sequence[state_count - 1] = (buf[byte_count + 2] << 16) + (buf[byte_count + 1] << 8) + buf[byte_count];
+      unsigned int message_length = 0;
+      message_length = (buf[byte_count + 7] << 24) + (buf[byte_count+ 6] << 16) + 
+                        (buf[byte_count + 5] << 8) + (buf[byte_count + 4]);
+
+      if (byte_count + message_length <= buf_size){
+        byte_count += message_length;
+      }else{// message broken
+        byte_count = buf_size;
+      }
+
+    }else{
+      char num = 0;
+      while(num < 3 && byte_count < buf_size){
+        state_sequence[state_count - 1] <<= 8;
+        state_sequence[state_count - 1] += buf[byte_count];
+        num++;
+        byte_count++;
+      }
+      byte_count = buf_size;
+    }
+  }
+
   *state_count_ref = state_count;
   return state_sequence;
 }
