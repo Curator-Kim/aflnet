@@ -69,6 +69,7 @@
 #include <sys/capability.h>
 
 #include "aflnet.h"
+#include "afl-pass.h"
 #include <graphviz/gvc.h>
 #include <math.h>
 
@@ -421,6 +422,9 @@ kliter_t(lms) *M2_prev, *M2_next;
 //Function pointers pointing to Protocol-specific functions
 unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) = NULL;
 region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) = NULL;
+
+unsigned int* (*collect_constraints)(unsigned char * buf, unsigned int buf_size, unsigned char * pass_check) = NULL;
+unsigned int (*conform_constraints)(unsigned char * buf, unsigned int buf_size, unsigned int pass_value) = NULL;
 
 /* Initialize the implemented state machine as a graphviz graph */
 void setup_ipsm()
@@ -1095,7 +1099,12 @@ int send_over_network()
   }
   else{
     last_buf_len = 0;
+    unsigned int pass_value = 0;
+    unsigned char pass_check = 0; 
     for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+      if(pass_check){
+        conform_constraints(kl_val(it)->mdata, kl_val(it)->msize, pass_value);
+      }
       n = net_send(sockfd, timeout_send, kl_val(it)->mdata, kl_val(it)->msize);
       last_buf_len += kl_val(it)->msize;
       messages_sent++;
@@ -1111,6 +1120,7 @@ int send_over_network()
       //retrieve server response
       u32 prev_buf_size = response_buf_size;
       n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
+      pass_value = collect_constraints(response_buf + prev_buf_size, response_buf_size - prev_buf_size, &pass_check);
       // allowing timeouts
       if ( n < 0 ) {
         goto HANDLE_RESPONSES;
@@ -9196,6 +9206,8 @@ int main(int argc, char** argv) {
         }else if (!strcmp(optarg, "OPC_UA")){
           extract_requests = &extract_requests_OPC_UA;
           extract_response_codes = &extract_response_codes_OPC_UA;
+          collect_constraints = &collect_constraints_opcua;
+          conform_constraints = &conform_constraints_opcua;
         }
         else {
           FATAL("%s protocol is not supported yet!", optarg);
