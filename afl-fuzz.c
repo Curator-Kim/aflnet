@@ -411,7 +411,7 @@ klist_t(lms) *kl_messages;
 khash_t(hs32) *khs_ipsm_paths;
 khash_t(hms) *khms_states;
 
-u8* last_buf;
+u8* last_buf = NULL;
 u32 last_buf_len;
 //M2_prev points to the last message of M1 (i.e., prefix)
 //If M1 is empty, M2_prev == NULL
@@ -4255,7 +4255,7 @@ keep_as_crash:
                         unique_crashes, kill_signal, describe_op(0));
   s32 fd = open(fn, O_WRONLY | O_CREAT, 0600);
   if (fd < 0) PFATAL("Unable to create file '%s'", fn);
-  if(remote_mode){
+  if(remote_mode && last_buf != NULL){
     ck_write(fd, last_buf, last_buf_len, fn);
     // stop_soon = 1;
   }
