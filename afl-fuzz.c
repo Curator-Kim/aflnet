@@ -423,8 +423,9 @@ kliter_t(lms) *M2_prev, *M2_next;
 unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) = NULL;
 region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) = NULL;
 
-unsigned int* (*collect_constraints)(unsigned char * buf, unsigned int buf_size, unsigned char * pass_check) = NULL;
-unsigned int (*conform_constraints)(unsigned char * buf, unsigned int buf_size, unsigned int pass_value) = NULL;
+unsigned int (*collect_constraints)(unsigned char * buf, unsigned int buf_size, unsigned char * pass_check, credentials * pass_value);
+unsigned int (*conform_constraints)(unsigned char * buf, unsigned int buf_size, credentials * pass_value);
+credentials *pass_value = NULL;
 
 /* Initialize the implemented state machine as a graphviz graph */
 void setup_ipsm()
@@ -1099,7 +1100,6 @@ int send_over_network()
   }
   else{
     last_buf_len = 0;
-    unsigned int pass_value = 0;
     unsigned char pass_check = 0; 
     for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
       if(pass_check){
@@ -1120,7 +1120,7 @@ int send_over_network()
       //retrieve server response
       u32 prev_buf_size = response_buf_size;
       n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
-      pass_value = collect_constraints(response_buf + prev_buf_size, response_buf_size - prev_buf_size, &pass_check);
+      collect_constraints(response_buf + prev_buf_size, response_buf_size - prev_buf_size, &pass_check, pass_value);
       // allowing timeouts
       if ( n < 0 ) {
         goto HANDLE_RESPONSES;
@@ -9208,6 +9208,8 @@ int main(int argc, char** argv) {
           extract_response_codes = &extract_response_codes_OPC_UA;
           collect_constraints = &collect_constraints_opcua;
           conform_constraints = &conform_constraints_opcua;
+          pass_value = ck_alloc(sizeof(credentials));
+          pass_value -> val = ck_alloc(8);
         }
         else {
           FATAL("%s protocol is not supported yet!", optarg);

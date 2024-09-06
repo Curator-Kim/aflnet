@@ -11,27 +11,30 @@
 #include "alloc-inl.h"
 #include "afl-pass.h"
 
-unsigned int collect_constraints_opcua(unsigned char * buf, unsigned int buf_size,unsigned char * pass_check){
-    if(buf_size >= 12){
-        if(strncmp(buf,"OPN",3) && *pass_check == 0){
-            *pass_check = 0;
-        }
-        else{
+unsigned int collect_constraints_opcua(unsigned char * buf, unsigned int buf_size,unsigned char * pass_check, credentials * pass_value){
+    /*
+    buf:
+    buf_size:
+    pass_check: 
+    */
+    if(buf_size >= 32){
+        if(!strncmp(buf,"OPN",3))
+        {
+            memcpy(pass_value -> val, buf + (buf_size - 24), 8);
             *pass_check = 1;
         }
-        return buf[8] + (buf[9]<<8) + (buf[10]<<16) + (buf[11]<<12);
+        return *pass_check;
     }
-    else{
+    else
+    {
         return 0;
     }
 }
 
-unsigned int conform_constraints_opcua(unsigned char * buf, unsigned int buf_size, unsigned int pass_value){
-    if (buf_size >= 12){
-        buf[8] = pass_value & 0xff;
-        buf[9] = (pass_value >> 8) & 0xff;
-        buf[10] = (pass_value >> 16) & 0xff;
-        buf[11] = (pass_value >> 24);
+unsigned int conform_constraints_opcua(unsigned char * buf, unsigned int buf_size, credentials * pass_value){
+    if (buf_size >= 16)
+    {
+        memcpy(buf + 8,pass_value -> val, 8);
         return 1;
     }
     return 0; 
