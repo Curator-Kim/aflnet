@@ -1102,9 +1102,11 @@ int send_over_network()
     last_buf_len = 0;
     unsigned char pass_check = 0; 
     for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+
       if(pass_check){
         conform_constraints(kl_val(it)->mdata, kl_val(it)->msize, pass_value);
       }
+
       n = net_send(sockfd, timeout_send, kl_val(it)->mdata, kl_val(it)->msize);
       last_buf_len += kl_val(it)->msize;
       messages_sent++;
@@ -1120,7 +1122,9 @@ int send_over_network()
       //retrieve server response
       u32 prev_buf_size = response_buf_size;
       n = net_recv(sockfd, timeout_recv, poll_wait_msecs, &response_buf, &response_buf_size);
-      collect_constraints(response_buf + prev_buf_size, response_buf_size - prev_buf_size, &pass_check, pass_value);
+      if(collect_constraints != NULL){
+        collect_constraints(response_buf + prev_buf_size, response_buf_size - prev_buf_size, &pass_check, pass_value);
+      }
       // allowing timeouts
       if ( n < 0 ) {
         goto HANDLE_RESPONSES;
@@ -4259,7 +4263,7 @@ keep_as_crash:
     ck_write(fd, last_buf, last_buf_len, fn);
     // stop_soon = 1;
   }
-  
+  close(fd);
   /*fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (fd < 0) PFATAL("Unable to create '%s'", fn);
   ck_write(fd, mem, len, fn);

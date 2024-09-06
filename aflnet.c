@@ -2057,10 +2057,10 @@ region_t* extract_requests_OPC_UA(unsigned char* buf, unsigned int buf_size, uns
     if (buf_size - cur_start >= 8){
 
       unsigned int message_length = 0;
-      message_length = (buf[cur_start + 7] << 24) + (buf[cur_start + 6] << 16) + 
-                        (buf[cur_start + 5] << 8) + (buf[cur_start + 4]);
+      message_length =  
+                        (buf[cur_start + 5] << 8) + (buf[cur_start + 4]); //the only method that I can make it stable ^_^
 
-      if (cur_start + message_length <= buf_size){
+      if (cur_start + message_length <= buf_size && message_length >= 8){ // if message_length=0, it will loop until crash...
         cur_end = cur_start + message_length - 1;
       }else{// message broken
         cur_end = buf_size - 1;

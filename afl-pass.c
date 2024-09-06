@@ -11,7 +11,7 @@
 #include "alloc-inl.h"
 #include "afl-pass.h"
 
-unsigned int collect_constraints_opcua(unsigned char * buf, unsigned int buf_size,unsigned char * pass_check, credentials * pass_value){
+unsigned int collect_constraints_opcua(unsigned char * buf, unsigned int buf_size, unsigned char * pass_check, credentials * pass_value){
     /*
     buf:
     buf_size:
@@ -34,7 +34,7 @@ unsigned int collect_constraints_opcua(unsigned char * buf, unsigned int buf_siz
 unsigned int conform_constraints_opcua(unsigned char * buf, unsigned int buf_size, credentials * pass_value){
     if (buf_size >= 16)
     {
-        memcpy(buf + 8,pass_value -> val, 8);
+        memcpy(buf + 8, pass_value -> val, 8);
         return 1;
     }
     return 0; 
